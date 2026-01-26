@@ -239,7 +239,7 @@ st.write("Ingresa tus datos y sube la foto de tu examen.")
 
 col1, col2 = st.columns(2)
 with col1:
-    dni = st.text_input("DNI o Código de Estudiante")
+    dni = st.text_input("Introduce aquí solo el número de tu DNI")
 with col2:
     name = st.text_input("Apellidos y Nombres completos")
 
