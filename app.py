@@ -39,7 +39,7 @@ def connect_to_sheets():
 
 # --- LÓGICA DE IA ---
 def grade_exam_with_gemini(image_file, answer_key, num_questions):
-    # Usamos 'gemini-1.5-flash' (o 2.5 si tienes acceso)
+    # Usamos 'gemini-2.5-pro' (o 2.5 si tienes acceso)
     model = genai.GenerativeModel('gemini-1.5-flash')
     
     # Preparamos la imagen
