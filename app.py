@@ -41,9 +41,31 @@ def connect_to_sheets():
     client = gspread.authorize(creds)
     return client.open_by_key(SHEET_ID)
 
+# --- FUNCIÓN PARA VERIFICAR SI EL ALUMNO YA DIO EXAMEN ---
+def check_if_student_exists(sheet, dni):
+    """
+    Busca si el DNI ya existe en la Columna A de la hoja.
+    Retorna: (True, Nota) si existe. (False, None) si no.
+    """
+    try:
+        # Obtenemos todos los registros (Columna A = DNI, Columna D = Nota)
+        # Asumimos estructura: [DNI, Nombre, Fecha, Nota]
+        records = sheet.get_all_values()
+        
+        # Iteramos buscando el DNI (saltamos la fila 1 si son encabezados)
+        for row in records:
+            if len(row) >= 4 and str(row[0]).strip().upper() == str(dni).strip().upper():
+                return True, row[3] # Retorna True y la nota guardada
+                
+        return False, None
+    except Exception as e:
+        # Si falla la lectura, asumimos que no existe para no bloquear, 
+        # pero mostramos advertencia en logs.
+        print(f"Error leyendo duplicados: {e}")
+        return False, None
+
 # --- LÓGICA DE IA CON PROTECCIÓN ANTI-COLAPSO ---
 def grade_exam_with_gemini(image_file, answer_key, num_questions):
-    # 1. SELECCIÓN DE MODELO DE ALTA VELOCIDAD (De tu lista disponible)
     # Usamos Flash-Lite 001 por ser el más eficiente para concurrencia masiva
     model_name = 'gemini-2.0-flash-lite-001' 
     model = genai.GenerativeModel(model_name)
@@ -90,11 +112,10 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
         "response_mime_type": "application/json",
     }
 
-    # --- LÓGICA DE REINTENTOS Y JITTER (LA SOLUCIÓN TÉCNICA) ---
+    # LÓGICA DE REINTENTOS Y JITTER
     max_retries = 3
-    base_delay = 2 # Segundos
+    base_delay = 2 
     
-    # 1. Jitter Inicial: Espera aleatoria para no golpear la API todos a la vez
     time.sleep(random.uniform(0.1, 4.0)) 
 
     for attempt in range(max_retries):
@@ -106,13 +127,11 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
             return json.loads(response.text)
 
         except exceptions.ResourceExhausted:
-            # Error 429: Demasiadas peticiones. Esperamos y reintentamos.
             wait_time = base_delay * (2 ** attempt) + random.uniform(0, 1)
             st.toast(f"⏳ Tráfico alto. Reintentando en {int(wait_time)}s... (Intento {attempt+1}/{max_retries})")
             time.sleep(wait_time)
             
         except Exception as e:
-            # Otros errores (cortes de internet, errores 500, etc)
             st.error(f"Error técnico: {e}")
             return None
             
@@ -120,15 +139,16 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
     return None
 
 # --- GENERACIÓN DE PDF ---
-def create_pdf(student_name, grading_data, total_score):
+def create_pdf(student_name, dni, grading_data, total_score):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
     
     pdf.cell(200, 10, txt=f"Resultados Examen Pavimentos", ln=1, align='C')
     pdf.cell(200, 10, txt=f"Alumno: {student_name}", ln=1, align='L')
+    pdf.cell(200, 10, txt=f"DNI/Código: {dni}", ln=1, align='L')
     pdf.cell(200, 10, txt=f"Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=1, align='L')
-    pdf.line(10, 35, 200, 35)
+    pdf.line(10, 40, 200, 40)
     pdf.ln(10)
     
     for item in grading_data['detalles']:
@@ -187,18 +207,38 @@ if exam_password_sheet:
 
 # 3. ZONA DEL ALUMNO
 st.markdown("---")
-st.write("Sube una foto clara de tu hoja de respuestas.")
+st.write("Ingresa tus datos y sube la foto de tu examen.")
 
-name = st.text_input("Apellidos y Nombres completos")
+# --- CAMBIO: INPUTS DE DATOS ---
+col1, col2 = st.columns(2)
+with col1:
+    dni = st.text_input("DNI o Código de Estudiante")
+with col2:
+    name = st.text_input("Apellidos y Nombres completos")
+
 uploaded_file = st.file_uploader("Tomar foto o subir archivo", type=['jpg', 'png', 'jpeg'])
 
 if st.button("Enviar y Calificar"):
-    if not name or not uploaded_file:
-        st.warning("Falta tu nombre o la foto.")
+    if not dni or not name or not uploaded_file:
+        st.warning("⚠️ Faltan datos: Asegúrate de poner tu DNI, Nombre y Foto.")
     else:
-        # Mensaje personalizado para pedir paciencia
-        with st.spinner('Procesando... Si tarda unos segundos, es normal (estamos evitando saturar el sistema).'):
-            
+        # VALIDACIÓN 1: Verificar duplicados en Sheets
+        with st.spinner('Verificando registro...'):
+            try:
+                hoja_registro = wb.sheet1
+                ya_existe, nota_existente = check_if_student_exists(hoja_registro, dni)
+                
+                if ya_existe:
+                    st.warning(f"⛔ El DNI {dni} ya realizó este examen previamente.")
+                    st.info(f"📋 Tu nota registrada es: **{nota_existente} / 20**")
+                    st.error("El sistema no admite reenvíos para garantizar la integridad de la evaluación.")
+                    st.stop() # DETENEMOS AQUÍ. No se llama a Gemini.
+            except Exception as e:
+                st.error(f"Error verificando duplicados: {e}")
+                st.stop()
+
+        # Si no existe, procedemos a calificar (VALIDACIÓN 2: IA)
+        with st.spinner('Procesando... Si tarda unos segundos, es normal.'):
             result = grade_exam_with_gemini(uploaded_file, answer_key, num_questions)
             
             if result:
@@ -209,9 +249,11 @@ if st.button("Enviar y Calificar"):
                 except:
                     nota_final = 0.0
 
-                # Guardado en Sheets
+                # Guardado en Sheets (AHORA CON DNI EN LA COLUMNA A)
                 try:
-                    wb.sheet1.append_row([
+                    # Estructura: [DNI, Nombre, Fecha, Nota]
+                    hoja_registro.append_row([
+                        str(dni).strip(),
                         name, 
                         datetime.now().strftime("%Y-%m-%d %H:%M"), 
                         nota_final
@@ -224,10 +266,10 @@ if st.button("Enviar y Calificar"):
                 st.balloons()
                 st.success(f"CALIFICACIÓN COMPLETADA: **{nota_final} / 20**")
                 
-                pdf_bytes = create_pdf(name, result, nota_final)
+                pdf_bytes = create_pdf(name, dni, result, nota_final)
                 st.download_button(
                     label="⬇️ Descargar PDF Detallado",
                     data=pdf_bytes,
-                    file_name=f"Resultado_{name.replace(' ', '_')}.pdf",
+                    file_name=f"Resultado_{dni}.pdf",
                     mime="application/pdf"
                 )
