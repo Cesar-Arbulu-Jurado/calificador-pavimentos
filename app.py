@@ -166,36 +166,50 @@ def create_pdf(student_name, grading_data, total_score):
     return pdf.output(dest='S').encode('latin-1')
 
 # --- INTERFAZ DE USUARIO (STREAMLIT) ---
-st.set_page_config(page_title="Control de Lectura", page_icon="📝")
+st.set_page_config(page_title="Examen Pavimentos", page_icon="📝")
 
-# --- LECTURA AUTOMÁTICA DEL SOLUCIONARIO ---
+# --- LECTURA DE CONFIGURACIÓN (Solucionario + Contraseña) ---
 try:
-    # 1. Conectamos (esto nos trae la Hoja 1 por defecto)
+    # 1. Conectamos
     hoja_registro = connect_to_sheets()
     
-    # 2. "Saltamos" al archivo completo para buscar la pestaña "Config"
-    # IMPORTANTE: Tu pestaña en Google Sheets debe llamarse exactamente Config
+    # 2. Buscamos la pestaña "Config"
     hoja_config = hoja_registro.spreadsheet.worksheet("Config")
     
-    # 3. Leemos la celda A1
+    # 3. Leemos Solucionario (A1) y Contraseña (A2)
     answer_key = hoja_config.acell('A1').value
+    exam_password_sheet = hoja_config.acell('A2').value # <--- NUEVO: Leemos la clave
     
-    # 4. Definimos las preguntas (puedes cambiar este número aquí si necesitas)
+    # Convertimos a texto por seguridad (por si en Excel pusiste solo números)
+    exam_password_sheet = str(exam_password_sheet).strip() if exam_password_sheet else None
+
+    # 4. Definimos preguntas
     num_questions = 4
 
     if not answer_key:
-        st.error("⚠️ Error: La celda A1 de la pestaña 'Config' está vacía.")
+        st.error("⚠️ Error: Falta el solucionario en la celda A1 de 'Config'.")
         st.stop()
         
 except Exception as e:
-    st.error(f"⚠️ No pude leer el solucionario. Asegúrate de tener una pestaña llamada 'Config' y el texto en A1. Error: {e}")
+    st.error(f"⚠️ Error de conexión con Google Sheets: {e}")
     st.stop()
 
-# --- ZONA DEL ALUMNO ---
+# --- ZONA DE ACCESO ---
 st.title("📝 Control de lectura")
+
+# 1. PANTALLA DE BLOQUEO
+input_code = st.text_input("🔐 Ingresa el CÓDIGO DE EXAMEN proporcionado por el profesor:", type="password")
+
+# Verificamos si el código coincide (o si la celda A2 está vacía, dejamos pasar)
+if exam_password_sheet and input_code != exam_password_sheet:
+    st.info("👋 Por favor ingresa el código correcto para desbloquear el examen.")
+    st.stop() # DETIENE LA APP AQUÍ si la clave no es correcta
+
+# --- ZONA DEL ALUMNO (Solo visible si el código es correcto) ---
+st.success("✅ Acceso autorizado")
 st.markdown("Sube una foto clara de tu hoja de respuestas.")
 
-name = st.text_input("Apellidos y Nombres")
+name = st.text_input("Apellidos y Nombres completas")
 uploaded_file = st.file_uploader("Tomar foto o subir archivo", type=['jpg', 'png', 'jpeg'])
 
 if st.button("Enviar y Calificar"):
@@ -212,21 +226,25 @@ if st.button("Enviar y Calificar"):
                 # Calcular nota final
                 total_score = sum(item['puntaje'] for item in result['detalles'])
                 
-                # Ajuste si son 4 preguntas (4x5=20) o 5 preguntas (5x4=20)
-                # La IA puntúa sobre 5. Si son 5 preguntas, la suma es 25. Hay que escalar a 20.
-                # Si son 4 preguntas, la suma es 20. No hay que escalar.
-                if num_questions == 5:
-                    total_score = (total_score / 25) * 20
+                # Ajuste de escala (si son 5 preguntas = 25 pts, escalamos a 20)
+                # Si son 4 preguntas = 20 pts, se queda igual.
+                if num_questions * 5 != 20:
+                     total_score = (total_score / (num_questions * 5)) * 20
                 
                 total_score = round(total_score, 2)
 
                 # 2. Guardar en Sheets
                 try:
                     sheet = connect_to_sheets()
-                    sheet.append_row([name, datetime.now().strftime("%Y-%m-%d %H:%M"), total_score])
+                    # Guardamos: Nombre, Fecha, Nota, Código usado (para auditoría)
+                    sheet.append_row([
+                        name, 
+                        datetime.now().strftime("%Y-%m-%d %H:%M"), 
+                        total_score
+                    ])
                     st.toast("✅ Nota guardada en el registro.")
                 except Exception as e:
-                    st.error(f"Error guardando en Sheets (Avise al profesor): {e}")
+                    st.error(f"Error guardando en Sheets: {e}")
 
                 # 3. Mostrar resultados y PDF
                 st.success(f"Examen calificado. Tu nota es: **{total_score}/20**")
