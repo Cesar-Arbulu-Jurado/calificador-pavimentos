@@ -39,7 +39,7 @@ def connect_to_sheets():
 
 # --- LÓGICA DE IA ---
 def grade_exam_with_gemini(image_file, answer_key, num_questions):
-    # CAMBIO IMPORTANTE: Usamos 'gemini-2.5-flash' porque es el que soporta mejor el modo JSON y es más estable.
+    # CAMBIO IMPORTANTE: Usamos 'gemini-2.5-pro' porque es el que soporta mejor el modo JSON y es más estable.
     model = genai.GenerativeModel('gemini-2.5-flash')
     
     # Preparamos la imagen
@@ -80,7 +80,7 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
     
     # Configuración corregida y unificada
     generation_config = {
-        "temperature": 0.2,
+        "temperature": 0.1,
         "top_p": 0.95,
         "top_k": 40,
         "max_output_tokens": 8192,                # Suficiente espacio para que no se corte
