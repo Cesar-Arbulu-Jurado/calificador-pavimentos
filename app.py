@@ -7,15 +7,15 @@ import json
 import pandas as pd
 from datetime import datetime
 
-# --- CONFIGURACIÓN ---
-# Configura tu API Key de Gemini aquí o en las 'secrets' de Streamlit
-GENAI_API_KEY = "AIzaSyA1fmRl8vCNfqZ0wBinuCMEis4s5Q8XFzw" 
-
 # AGREGA ESTA LÍNEA CON EL ID QUE COPIASTE EN EL PASO 1
 SHEET_ID = "1LoByskK71512Gfyekk67k_OuXIbAg5BkBxq7Jcermz0"
 
-# Configurar Gemini
-genai.configure(api_key=GENAI_API_KEY)
+# NUEVA CONFIGURACIÓN DE GEMINI (Usando la llave oculta en Secrets)
+try:
+    # Busca la llave "GEMINI_KEY" en la caja fuerte de Streamlit
+    genai.configure(api_key=st.secrets["GEMINI_KEY"])
+except:
+    st.error("No encontré la llave GEMINI_KEY en los secretos.")
 
 # Configurar Google Sheets (Compatible con PC y Nube)
 def connect_to_sheets():
