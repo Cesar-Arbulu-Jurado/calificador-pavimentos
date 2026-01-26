@@ -143,8 +143,8 @@ def create_pdf(student_name, grading_data, total_score):
     pdf.add_page()
     pdf.set_font("Arial", size=12)
     
-    pdf.cell(200, 10, txt=f"Resultados Examen de Pavimentos", ln=1, align='C')
-    pdf.cell(200, 10, txt=f"Alumno: {student_name}", ln=1, align='L')
+    pdf.cell(200, 10, txt=f"Resultados del Examen", ln=1, align='C')
+    pdf.cell(200, 10, txt=f"Alumno(a): {student_name}", ln=1, align='L')
     pdf.cell(200, 10, txt=f"Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=1, align='L')
     pdf.line(10, 35, 200, 35)
     pdf.ln(10)
@@ -166,7 +166,7 @@ def create_pdf(student_name, grading_data, total_score):
     return pdf.output(dest='S').encode('latin-1')
 
 # --- INTERFAZ DE USUARIO (STREAMLIT) ---
-st.set_page_config(page_title="Examen Pavimentos", page_icon="📝")
+st.set_page_config(page_title="Control de Lectura", page_icon="📝")
 
 # --- LECTURA AUTOMÁTICA DEL SOLUCIONARIO ---
 try:
@@ -195,7 +195,7 @@ except Exception as e:
 st.title("📝 Control de lectura")
 st.markdown("Sube una foto clara de tu hoja de respuestas.")
 
-name = st.text_input("Apellidos y Nombres completas")
+name = st.text_input("Apellidos y Nombres")
 uploaded_file = st.file_uploader("Tomar foto o subir archivo", type=['jpg', 'png', 'jpeg'])
 
 if st.button("Enviar y Calificar"):
