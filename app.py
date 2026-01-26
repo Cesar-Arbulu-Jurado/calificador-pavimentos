@@ -39,8 +39,8 @@ def connect_to_sheets():
 
 # --- LÓGICA DE IA ---
 def grade_exam_with_gemini(image_file, answer_key, num_questions):
-    # CAMBIO IMPORTANTE: Usamos 'gemini-2.5-pro' porque es el que soporta mejor el modo JSON y es más estable.
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    # Usamos 'gemini-1.5-flash' (o 2.5 si tienes acceso)
+    model = genai.GenerativeModel('gemini-1.5-flash')
     
     # Preparamos la imagen
     image_parts = [
@@ -50,7 +50,8 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
         }
     ]
 
-prompt = f"""
+    # PROMPT INTEGRADO: Rúbrica Pedagógica + Salida JSON
+    prompt = f"""
     # SISTEMA DE EVALUACIÓN DE EXÁMENES MANUSCRITOS — INGENIERÍA CIVIL
 
     ## ROL
@@ -90,38 +91,38 @@ prompt = f"""
     4. **Valoración de la argumentación** técnica (si aplica)
 
     ## RESTRICCIONES
-    - No inventes contenido que no esté visible en la imagen
-    - Ante ambigüedad caligráfica, aplica el principio de interpretación más favorable al alumno si existe una lectura razonable que sea correcta
-    - Distingue entre errores conceptuales (penalizan más) y errores de transcripción o cálculo menor
-    - Usa notación decimal con coma (ej.: 3.5)
+    - No inventes contenido que no esté visible en la imagen.
+    - Ante ambigüedad caligráfica, aplica el principio de interpretación más favorable al alumno.
+    - Distingue entre errores conceptuales (penalizan más) y errores menores.
+    - Usa notación decimal con coma (ej.: 3.5).
 
     ## SALIDA REQUERIDA (SOLO JSON)
-    Aunque el protocolo describe un reporte textual, para que el sistema informático funcione, 
-    DEVUELVE ESTRICTAMENTE UN OBJETO JSON con la siguiente estructura (sin texto antes ni después):
+    Para garantizar la compatibilidad con el sistema, ignora el formato de reporte textual y DEVUELVE ESTRICTAMENTE UN JSON con esta estructura:
     {{
         "detalles": [
             {{
                 "pregunta": 1, 
                 "puntaje": 0.0, 
-                "feedback": "Transcripción: [texto]... Aciertos: [texto]... Errores: [texto]... Recomendación: [texto]"
+                "feedback": "Transcripción: [texto]... Análisis: [texto]... Retroalimentación: [texto]"
             }},
             {{
                 "pregunta": 2, 
                 "puntaje": 0.0, 
                 "feedback": "..."
             }}
-            ... (repetir para las {num_questions} preguntas)
+            ... (repetir para todas las preguntas)
         ],
-        "comentario_final": "Resumen ejecutivo del alumno, mencionando puntaje total, calificación cualitativa y consejos de estudio."
+        "comentario_final": "Resumen ejecutivo: Puntaje total, porcentaje y calificación cualitativa según la rúbrica."
     }}
-    """    
+    """
+    
     # Configuración corregida y unificada
     generation_config = {
         "temperature": 0.1,
         "top_p": 0.95,
         "top_k": 40,
-        "max_output_tokens": 8192,                # Suficiente espacio para que no se corte
-        "response_mime_type": "application/json", # Obliga a la IA a responder en JSON perfecto
+        "max_output_tokens": 8192,
+        "response_mime_type": "application/json",
     }
 
     try:
@@ -131,8 +132,6 @@ prompt = f"""
             generation_config=generation_config
         )
         
-        # Al usar response_mime_type, la respuesta ya es un JSON válido.
-        # No hace falta limpiar "```json" porque la IA ya no lo pone en este modo.
         return json.loads(response.text)
 
     except Exception as e:
