@@ -17,13 +17,23 @@ SHEET_ID = "1LoByskK71512Gfyekk67k_OuXIbAg5BkBxq7Jcermz0"
 # Configurar Gemini
 genai.configure(api_key=GENAI_API_KEY)
 
-# Configurar Google Sheets
+# Configurar Google Sheets (Compatible con PC y Nube)
 def connect_to_sheets():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
+    
+    # 1. Si estamos en la nube (Streamlit Cloud), usa los "Secretos"
+    if "gcp_service_account" in st.secrets:
+        creds = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=scopes
+        )
+    # 2. Si estamos en tu PC, usa el archivo normal
+    else:
+        creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
+        
     client = gspread.authorize(creds)
     
-    # AQUÍ ESTÁ EL TRUCO: open_by_key es infalible
+    # Usamos la variable global SHEET_ID que definiste arriba
     sheet = client.open_by_key(SHEET_ID).sheet1 
     return sheet
 
@@ -123,21 +133,28 @@ def create_pdf(student_name, grading_data, total_score):
 # --- INTERFAZ DE USUARIO (STREAMLIT) ---
 st.set_page_config(page_title="Examen Pavimentos", page_icon="📝")
 
-# --- BARRA LATERAL (Zona del Profesor) ---
-with st.sidebar:
-    st.header("Zona del Docente 👨‍🏫")
-    password = st.text_input("Contraseña de acceso", type="password")
+# --- LECTURA AUTOMÁTICA DEL SOLUCIONARIO ---
+try:
+    # 1. Conectamos (esto nos trae la Hoja 1 por defecto)
+    hoja_registro = connect_to_sheets()
     
-    if password == "civil2026": # CAMBIA ESTA CONTRASEÑA
-        st.success("Acceso concedido")
-        num_questions = st.number_input("Número de Preguntas", min_value=1, max_value=10, value=4)
-        answer_key = st.text_area("Solucionario (Texto plano)", height=200, 
-                                  placeholder="Ej:\n1. El CBR mide la resistencia al corte...\n2. El asfalto espumado se usa para...")
-        st.info("Este solucionario está oculto para los alumnos.")
-    else:
-        st.warning("Ingresa la contraseña para configurar el examen.")
-        answer_key = None
-        num_questions = 4
+    # 2. "Saltamos" al archivo completo para buscar la pestaña "Config"
+    # IMPORTANTE: Tu pestaña en Google Sheets debe llamarse exactamente Config
+    hoja_config = hoja_registro.spreadsheet.worksheet("Config")
+    
+    # 3. Leemos la celda A1
+    answer_key = hoja_config.acell('A1').value
+    
+    # 4. Definimos las preguntas (puedes cambiar este número aquí si necesitas)
+    num_questions = 4
+
+    if not answer_key:
+        st.error("⚠️ Error: La celda A1 de la pestaña 'Config' está vacía.")
+        st.stop()
+        
+except Exception as e:
+    st.error(f"⚠️ No pude leer el solucionario. Asegúrate de tener una pestaña llamada 'Config' y el texto en A1. Error: {e}")
+    st.stop()
 
 # --- ZONA DEL ALUMNO ---
 st.title("📝 Evaluación Continua - Pavimentos")
