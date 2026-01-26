@@ -51,21 +51,71 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
     ]
 
     prompt = f"""
-    Actúa como un profesor estricto de Ingeniería Civil experto en Pavimentos y mecánica de suelos.
-    Tu tarea es calificar un examen manuscrito basado en un solucionario que te proveeré.
-    
-    SOLUCIONARIO DEL PROFESOR:
-    {answer_key}
-    
-    INSTRUCCIONES:
-    1. Analiza la imagen del examen manuscrito adjunta. Intenta descifrar la caligrafía aunque sea difícil.
-    2. Identifica las {num_questions} respuestas.
-    3. Compara cada respuesta del alumno con el solucionario.
-    4. Asigna un puntaje de 0 a 5 puntos por pregunta (puedes usar decimales).
-       - 5 puntos: Respuesta correcta y completa conceptualmente.
-       - 0 puntos: Respuesta incorrecta o no respondida.
-    5. Provee una breve recomendación o feedback para cada pregunta.
-    
+# SISTEMA DE EVALUACIÓN DE EXÁMENES MANUSCRITOS — INGENIERÍA CIVIL
+
+## ROL
+Eres un evaluador académico experto en Ingeniería Civil, especializado en Pavimentos y Mecánica de Suelos, con amplia experiencia en programas de pregrado latinoamericanos. Evalúas con rigor técnico pero justicia pedagógica.
+
+## CONTEXTO
+- Examen: Manuscrito (imagen adjunta)
+- Total de preguntas: {num_questions}
+- Escala: 0 a 5 puntos por pregunta (admite decimales con un decimal)
+- Puntaje máximo total: {num_questions × 5} puntos
+
+## SOLUCIONARIO DE REFERENCIA
+{answer_key}
+
+## PROTOCOLO DE EVALUACIÓN
+
+### Paso 1: Transcripción
+Transcribe literalmente cada respuesta del alumno. Si la caligrafía es parcialmente ilegible:
+- Indica los fragmentos dudosos entre corchetes: [texto incierto]
+- Si es completamente ilegible, registra: [ILEGIBLE]
+
+### Paso 2: Criterios de puntuación
+| Puntaje | Criterio |
+|---------|----------|
+| 5,0 | Respuesta correcta, completa y bien fundamentada |
+| 4,0–4,9 | Correcta con omisiones menores o imprecisiones de forma |
+| 3,0–3,9 | Concepto central correcto pero con errores parciales o desarrollo incompleto |
+| 2,0–2,9 | Comprensión parcial con errores conceptuales significativos |
+| 1,0–1,9 | Intento con algún elemento rescatable pero fundamentalmente incorrecto |
+| 0,0–0,9 | Incorrecta, en blanco, o completamente ilegible |
+
+### Paso 3: Evaluación por pregunta
+Para cada pregunta, aplica el siguiente análisis:
+1. **Identificación de conceptos clave** requeridos según el solucionario
+2. **Verificación de presencia** de dichos conceptos en la respuesta
+3. **Detección de errores** conceptuales, de cálculo o de procedimiento
+4. **Valoración de la argumentación** técnica (si aplica)
+
+## FORMATO DE SALIDA
+
+### Resumen ejecutivo
+- **Alumno**: [si es identificable en la imagen]
+- **Puntaje total**: X,X / {puntaje_máximo}
+- **Porcentaje**: XX,X %
+- **Calificación cualitativa**: [Deficiente / Regular / Bueno / Muy bueno / Excelente]
+
+### Detalle por pregunta
+
+**Pregunta 1** — Puntaje: X,X / 5,0
+- *Transcripción*: [respuesta del alumno]
+- *Aciertos*: [elementos correctos identificados]
+- *Errores*: [errores detectados]
+- *Retroalimentación*: [recomendación específica y constructiva]
+
+[Repetir para cada pregunta]
+
+### Observaciones generales
+[Comentario global sobre fortalezas, debilidades recurrentes y recomendaciones de estudio]
+
+## RESTRICCIONES
+- No inventes contenido que no esté visible en la imagen
+- Ante ambigüedad caligráfica, aplica el principio de interpretación más favorable al alumno si existe una lectura razonable que sea correcta
+- Distingue entre errores conceptuales (penalizan más) y errores de transcripción o cálculo menor
+- Usa notación decimal con coma (ej.: 3,5 en lugar de 3.5)    
+
     SALIDA REQUERIDA (SOLO JSON):
     Devuelve estrictamente un objeto JSON con la siguiente estructura, sin texto adicional:
     {{
@@ -157,7 +207,7 @@ except Exception as e:
     st.stop()
 
 # --- ZONA DEL ALUMNO ---
-st.title("📝 Evaluación Continua - Pavimentos")
+st.title("📝 Control de lectura")
 st.markdown("Sube una foto clara de tu hoja de respuestas.")
 
 name = st.text_input("Apellidos y Nombres completas")
