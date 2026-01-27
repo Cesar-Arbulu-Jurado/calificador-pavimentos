@@ -1,6 +1,13 @@
+import pytz  # <---línea nueva
 import streamlit as st
 import google.generativeai as genai
 import gspread
+
+# --- FUNCIÓN DE HORA LOCAL (PERÚ) ---
+def get_current_time_peru():
+    peru_tz = pytz.timezone('America/Lima')
+    return datetime.now(peru_tz).strftime("%Y-%m-%d %H:%M")
+
 from google.oauth2.service_account import Credentials
 from fpdf import FPDF
 import json
@@ -198,7 +205,7 @@ def create_pdf(student_name, dni, grading_data, total_score):
     pdf.cell(200, 10, txt=f"Resultados Examen Pavimentos", ln=1, align='C')
     pdf.cell(200, 10, txt=f"Alumno: {student_name}", ln=1, align='L')
     pdf.cell(200, 10, txt=f"DNI/Código: {dni}", ln=1, align='L')
-    pdf.cell(200, 10, txt=f"Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=1, align='L')
+    pdf.cell(200, 10, txt=f"Fecha: {get_current_time_peru()}", ln=1, align='L')
     pdf.line(10, 45, 200, 45)
     pdf.ln(10)
     
@@ -293,13 +300,13 @@ if st.button("Enviar y Calificar"):
                 try:
                     wb = connect_to_sheets()
                     hoja_registro = wb.sheet1
-                    hoja_registro.append_row([
-                        str(dni).strip(),
-                        name, 
-                        datetime.now().strftime("%Y-%m-%d %H:%M"), 
-                        nota_final
-                    ])
-                    st.toast("✅ Nota registrada correctamente.")
+		    hoja_registro.append_row([
+		        str(dni).strip(),
+    			name, 
+    			get_current_time_peru(), # <--- USAMOS LA NUEVA FUNCIÓN
+    			nota_final
+		    ])
+		st.toast("✅ Nota registrada correctamente.")
                 except Exception as e:
                     st.error(f"Error guardando registro: {e}")
 
