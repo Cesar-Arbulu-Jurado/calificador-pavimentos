@@ -1,13 +1,6 @@
-import pytz  # <---línea nueva
 import streamlit as st
 import google.generativeai as genai
 import gspread
-
-# --- FUNCIÓN DE HORA LOCAL (PERÚ) ---
-def get_current_time_peru():
-    peru_tz = pytz.timezone('America/Lima')
-    return datetime.now(peru_tz).strftime("%Y-%m-%d %H:%M")
-
 from google.oauth2.service_account import Credentials
 from fpdf import FPDF
 import json
@@ -15,6 +8,7 @@ import pandas as pd
 from datetime import datetime
 import time
 import random
+import pytz  # <--- NUEVO IMPORT PARA LA HORA DE PERÚ
 from google.api_core import exceptions
 
 # --- CONFIGURACIÓN ---
@@ -29,9 +23,13 @@ try:
 except Exception as e:
     st.error(f"Error configurando API Key: {e}")
 
+# --- FUNCIÓN DE HORA LOCAL (PERÚ) ---
+def get_current_time_peru():
+    peru_tz = pytz.timezone('America/Lima')
+    return datetime.now(peru_tz).strftime("%Y-%m-%d %H:%M")
+
 # --- FUNCIÓN DE CONEXIÓN A SHEETS (OPTIMIZADA CON CACHÉ) ---
-# Solución 1: @st.cache_resource evita reconectar por cada alumno
-@st.cache_resource(ttl=3600)  # La conexión se mantiene viva 1 hora
+@st.cache_resource(ttl=3600)  
 def connect_to_sheets():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
@@ -51,9 +49,7 @@ def connect_to_sheets():
     return client.open_by_key(SHEET_ID)
 
 # --- FUNCIÓN PARA CARGAR CONFIGURACIÓN (OPTIMIZADA CON CACHÉ) ---
-# Solución 1: @st.cache_data guarda el Solucionario y Password en memoria RAM
-# Esto evita 50 lecturas a Sheets cuando entran 50 alumnos.
-@st.cache_data(ttl=600)  # Se actualiza cada 10 minutos por si cambias el password
+@st.cache_data(ttl=600) 
 def load_config_data():
     try:
         wb = connect_to_sheets()
@@ -71,15 +67,12 @@ def load_config_data():
         return None, None
 
 # --- FUNCIÓN PARA VERIFICAR SI EL ALUMNO YA DIO EXAMEN ---
-# Solución 2: Lazy Loading - Esta función NO se cachea porque necesitamos datos en tiempo real
 def check_if_student_exists(dni):
     try:
-        # Conectamos solo cuando es necesario
         wb = connect_to_sheets()
         sheet = wb.sheet1
         records = sheet.get_all_values()
         for row in records:
-            # Asumimos DNI en columna A (índice 0) y Nota en columna D (índice 3)
             if len(row) >= 4 and str(row[0]).strip().upper() == str(dni).strip().upper():
                 return True, row[3]
         return False, None
@@ -87,9 +80,8 @@ def check_if_student_exists(dni):
         print(f"Error leyendo duplicados: {e}")
         return False, None
 
-# --- LÓGICA DE IA CON TU PROMPT PEDAGÓGICO ORIGINAL ---
+# --- LÓGICA DE IA CON TU PROMPT PEDAGÓGICO ---
 def grade_exam_with_gemini(image_file, answer_key, num_questions):
-    # Modelo optimizado: gemini-2.0-flash-lite-001 es rápido y eficiente para concurrencia
     model_name = 'gemini-2.0-flash-lite-001' 
     model = genai.GenerativeModel(model_name)
     
@@ -97,7 +89,6 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
         {"mime_type": image_file.type, "data": image_file.getvalue()}
     ]
 
-    # --- TU PROMPT ORIGINAL DE INGENIERÍA CIVIL (INTACTO) ---
     prompt = f"""
     # SISTEMA DE EVALUACIÓN DE EXÁMENES MANUSCRITOS — INGENIERÍA CIVIL
 
@@ -168,11 +159,9 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
         "response_mime_type": "application/json",
     }
 
-    # LÓGICA DE REINTENTOS Y JITTER
     max_retries = 3
     base_delay = 2 
     
-    # Jitter inicial
     time.sleep(random.uniform(0.1, 4.0)) 
 
     for attempt in range(max_retries):
@@ -205,6 +194,7 @@ def create_pdf(student_name, dni, grading_data, total_score):
     pdf.cell(200, 10, txt=f"Resultados Examen Pavimentos", ln=1, align='C')
     pdf.cell(200, 10, txt=f"Alumno: {student_name}", ln=1, align='L')
     pdf.cell(200, 10, txt=f"DNI/Código: {dni}", ln=1, align='L')
+    # AQUI USAMOS LA HORA DE PERÚ
     pdf.cell(200, 10, txt=f"Fecha: {get_current_time_peru()}", ln=1, align='L')
     pdf.line(10, 45, 200, 45)
     pdf.ln(10)
@@ -214,7 +204,6 @@ def create_pdf(student_name, dni, grading_data, total_score):
         pdf.set_font("Arial", 'B', 12)
         pdf.cell(0, 10, txt=f"Pregunta {item['pregunta']} - Puntaje: {item['puntaje']}/5", ln=1)
         pdf.set_font("Arial", size=11)
-        # Usamos multi_cell para que el texto rico del feedback se vea bien
         pdf.multi_cell(0, 6, txt=f"{item['feedback']}")
         pdf.ln(3)
         
@@ -232,12 +221,11 @@ def create_pdf(student_name, dni, grading_data, total_score):
 # --- INTERFAZ PRINCIPAL ---
 st.set_page_config(page_title="Examen Pavimentos", page_icon="📝")
 
-# 1. CARGA DE CONFIGURACIÓN (USANDO LA FUNCIÓN CACHEADA)
+# 1. CARGA DE CONFIGURACIÓN
 answer_key, exam_password_sheet = load_config_data()
 num_questions = 4 
 
 if not answer_key:
-    # Intento de recarga manual si falla el caché o la primera carga
     if st.button("🔄 Recargar Configuración"):
         st.cache_data.clear()
         st.rerun()
@@ -273,7 +261,6 @@ if st.button("Enviar y Calificar"):
         st.warning("⚠️ Faltan datos: Asegúrate de poner tu DNI, Nombre y Foto.")
     else:
         # VALIDACIÓN 1: Verificar duplicados (DNI)
-        # NOTA: Esto ahora usa Lazy Loading (se conecta recién aquí)
         with st.spinner('Verificando registro...'):
             ya_existe, nota_existente = check_if_student_exists(dni)
             
@@ -283,7 +270,7 @@ if st.button("Enviar y Calificar"):
                 st.error("El sistema no admite reenvíos para garantizar la integridad de la evaluación.")
                 st.stop() 
 
-        # VALIDACIÓN 2: Calificación con IA (Prompt Correcto + Flash Lite)
+        # VALIDACIÓN 2: Calificación con IA
         with st.spinner('Evaluando con criterio pedagógico...'):
             result = grade_exam_with_gemini(uploaded_file, answer_key, num_questions)
             
@@ -296,17 +283,16 @@ if st.button("Enviar y Calificar"):
                     nota_final = 0.0
 
                 # Guardado en Sheets (DNI en Columna A)
-                # NOTA: Volvemos a conectar para escribir
                 try:
                     wb = connect_to_sheets()
                     hoja_registro = wb.sheet1
-		    hoja_registro.append_row([
-		        str(dni).strip(),
-    			name, 
-    			get_current_time_peru(), # <--- USAMOS LA NUEVA FUNCIÓN
-    			nota_final
-		    ])
-		st.toast("✅ Nota registrada correctamente.")
+                    hoja_registro.append_row([
+                        str(dni).strip(),
+                        name, 
+                        get_current_time_peru(), # <--- AQUI USAMOS LA HORA DE PERÚ
+                        nota_final
+                    ])
+                    st.toast("✅ Nota registrada correctamente.")
                 except Exception as e:
                     st.error(f"Error guardando registro: {e}")
 
