@@ -22,7 +22,9 @@ try:
 except Exception as e:
     st.error(f"Error configurando API Key: {e}")
 
-# --- FUNCIÓN DE CONEXIÓN A SHEETS ---
+# --- FUNCIÓN DE CONEXIÓN A SHEETS (OPTIMIZADA CON CACHÉ) ---
+# Solución 1: @st.cache_resource evita reconectar por cada alumno
+@st.cache_resource(ttl=3600)  # La conexión se mantiene viva 1 hora
 def connect_to_sheets():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
@@ -41,9 +43,33 @@ def connect_to_sheets():
     client = gspread.authorize(creds)
     return client.open_by_key(SHEET_ID)
 
-# --- FUNCIÓN PARA VERIFICAR SI EL ALUMNO YA DIO EXAMEN ---
-def check_if_student_exists(sheet, dni):
+# --- FUNCIÓN PARA CARGAR CONFIGURACIÓN (OPTIMIZADA CON CACHÉ) ---
+# Solución 1: @st.cache_data guarda el Solucionario y Password en memoria RAM
+# Esto evita 50 lecturas a Sheets cuando entran 50 alumnos.
+@st.cache_data(ttl=600)  # Se actualiza cada 10 minutos por si cambias el password
+def load_config_data():
     try:
+        wb = connect_to_sheets()
+        hoja_config = wb.worksheet("Config")
+        data_config = hoja_config.batch_get(['A1', 'A2'])
+        
+        answer_key = data_config[0][0][0] if data_config[0] else None
+        exam_password = data_config[1][0][0] if (len(data_config) > 1 and data_config[1]) else None
+        
+        if exam_password:
+            exam_password = str(exam_password).strip()
+            
+        return answer_key, exam_password
+    except Exception as e:
+        return None, None
+
+# --- FUNCIÓN PARA VERIFICAR SI EL ALUMNO YA DIO EXAMEN ---
+# Solución 2: Lazy Loading - Esta función NO se cachea porque necesitamos datos en tiempo real
+def check_if_student_exists(dni):
+    try:
+        # Conectamos solo cuando es necesario
+        wb = connect_to_sheets()
+        sheet = wb.sheet1
         records = sheet.get_all_values()
         for row in records:
             # Asumimos DNI en columna A (índice 0) y Nota en columna D (índice 3)
@@ -54,9 +80,9 @@ def check_if_student_exists(sheet, dni):
         print(f"Error leyendo duplicados: {e}")
         return False, None
 
-# --- LÓGICA DE IA CON TU PROMPT PEDAGÓGICO CORRECTO ---
+# --- LÓGICA DE IA CON TU PROMPT PEDAGÓGICO ORIGINAL ---
 def grade_exam_with_gemini(image_file, answer_key, num_questions):
-    # Modelo optimizado para concurrencia (Flash-Lite 2.0)
+    # Modelo optimizado: gemini-2.0-flash-lite-001 es rápido y eficiente para concurrencia
     model_name = 'gemini-2.0-flash-lite-001' 
     model = genai.GenerativeModel(model_name)
     
@@ -64,7 +90,7 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
         {"mime_type": image_file.type, "data": image_file.getvalue()}
     ]
 
-    # --- AQUÍ ESTÁ TU PROMPT CORRECTO INSERTADO ADAPTATIVAMENTE ---
+    # --- TU PROMPT ORIGINAL DE INGENIERÍA CIVIL (INTACTO) ---
     prompt = f"""
     # SISTEMA DE EVALUACIÓN DE EXÁMENES MANUSCRITOS — INGENIERÍA CIVIL
 
@@ -199,30 +225,20 @@ def create_pdf(student_name, dni, grading_data, total_score):
 # --- INTERFAZ PRINCIPAL ---
 st.set_page_config(page_title="Examen Pavimentos", page_icon="📝")
 
-# 1. CARGA DE CONFIGURACIÓN
-try:
-    wb = connect_to_sheets()
-    hoja_config = wb.worksheet("Config")
-    
-    data_config = hoja_config.batch_get(['A1', 'A2'])
-    answer_key = data_config[0][0][0] if data_config[0] else None
-    exam_password_sheet = data_config[1][0][0] if (len(data_config) > 1 and data_config[1]) else None
-    
-    if exam_password_sheet:
-        exam_password_sheet = str(exam_password_sheet).strip()
+# 1. CARGA DE CONFIGURACIÓN (USANDO LA FUNCIÓN CACHEADA)
+answer_key, exam_password_sheet = load_config_data()
+num_questions = 4 
 
-    num_questions = 4 
-
-    if not answer_key:
-        st.error("⚠️ Falta el solucionario en la celda A1 de 'Config'.")
-        st.stop()
-
-except Exception as e:
-    st.error(f"Error conectando con Google Sheets: {e}")
+if not answer_key:
+    # Intento de recarga manual si falla el caché o la primera carga
+    if st.button("🔄 Recargar Configuración"):
+        st.cache_data.clear()
+        st.rerun()
+    st.error("⚠️ Error cargando la configuración. Si persiste, contacte al profesor.")
     st.stop()
 
 # 2. PANTALLA DE BLOQUEO
-st.title("📝 Evaluación Continua - Pavimentos")
+st.title("📝 Control de lectura")
 
 if exam_password_sheet:
     input_code = st.text_input("🔐 Ingresa el CÓDIGO DE ACCESO:", type="password")
@@ -250,19 +266,15 @@ if st.button("Enviar y Calificar"):
         st.warning("⚠️ Faltan datos: Asegúrate de poner tu DNI, Nombre y Foto.")
     else:
         # VALIDACIÓN 1: Verificar duplicados (DNI)
+        # NOTA: Esto ahora usa Lazy Loading (se conecta recién aquí)
         with st.spinner('Verificando registro...'):
-            try:
-                hoja_registro = wb.sheet1
-                ya_existe, nota_existente = check_if_student_exists(hoja_registro, dni)
-                
-                if ya_existe:
-                    st.warning(f"⛔ El DNI {dni} ya realizó este examen previamente.")
-                    st.info(f"📋 Tu nota registrada es: **{nota_existente} / 20**")
-                    st.error("El sistema no admite reenvíos para garantizar la integridad de la evaluación.")
-                    st.stop() 
-            except Exception as e:
-                st.error(f"Error verificando duplicados: {e}")
-                st.stop()
+            ya_existe, nota_existente = check_if_student_exists(dni)
+            
+            if ya_existe:
+                st.warning(f"⛔ El DNI {dni} ya realizó este examen previamente.")
+                st.info(f"📋 Tu nota registrada es: **{nota_existente} / 20**")
+                st.error("El sistema no admite reenvíos para garantizar la integridad de la evaluación.")
+                st.stop() 
 
         # VALIDACIÓN 2: Calificación con IA (Prompt Correcto + Flash Lite)
         with st.spinner('Evaluando con criterio pedagógico...'):
@@ -277,7 +289,10 @@ if st.button("Enviar y Calificar"):
                     nota_final = 0.0
 
                 # Guardado en Sheets (DNI en Columna A)
+                # NOTA: Volvemos a conectar para escribir
                 try:
+                    wb = connect_to_sheets()
+                    hoja_registro = wb.sheet1
                     hoja_registro.append_row([
                         str(dni).strip(),
                         name, 
