@@ -93,7 +93,7 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
     # SISTEMA DE EVALUACIÓN DE EXÁMENES MANUSCRITOS — INGENIERÍA CIVIL
 
     ## ROL
-    Eres un evaluador académico experto en Ingeniería Civil, especializado en Pavimentos y Mecánica de Suelos, con amplia experiencia en programas de pregrado latinoamericanos.
+    Eres un docente evaluador académico experto en Ingeniería Civil, especializado en Diseño de Pavimentos, Diseño de Cimentaciones y Mecánica de Suelos, con amplia experiencia en programas de pregrado latinoamericanos.
     Evalúas con rigor técnico pero justicia pedagógica.
 
     ## CONTEXTO
@@ -191,7 +191,7 @@ def create_pdf(student_name, dni, grading_data, total_score):
     pdf.set_font("Arial", size=12)
     
     # Encabezado
-    pdf.cell(200, 10, txt=f"Resultados Examen Pavimentos", ln=1, align='C')
+    pdf.cell(200, 10, txt=f"Resultados del Control de Lectura", ln=1, align='C')
     pdf.cell(200, 10, txt=f"Alumno: {student_name}", ln=1, align='L')
     pdf.cell(200, 10, txt=f"DNI/Código: {dni}", ln=1, align='L')
     # AQUI USAMOS LA HORA DE PERÚ
