@@ -101,7 +101,7 @@ def send_email_with_pdf(recipient_email, student_name, pdf_bytes):
     msg['From'] = f"Evaluación Automática <{smtp_user}>"
     msg['To'] = recipient_email
 
-    body = f"""Hola {student_name},
+    body = f"""Saludos {student_name},
 
 Adjunto encontrará el informe detallado de su evaluación.
 Fecha de generación: {get_current_time_peru()}
@@ -241,7 +241,7 @@ def create_pdf(student_name, dni, grading_data, total_score):
     pdf.cell(0, 6, txt="Universidad Nacional de San Antonio Abad del Cusco", ln=1, align='C')
     pdf.set_font("Arial", size=12)
     pdf.cell(0, 6, txt="Escuela Profesional de Ingeniería Civil", ln=1, align='C')
-    pdf.cell(0, 6, txt="Docente Ingeniero César Edilberto Arbulu Jurado", ln=1, align='C')
+    pdf.cell(0, 6, txt="Docente: Mgt. César Arbulú Jurado", ln=1, align='C')
     
     pdf.ln(5)
 
