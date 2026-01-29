@@ -8,13 +8,17 @@ import pandas as pd
 from datetime import datetime
 import time
 import random
-import pytz  # <--- NUEVO IMPORT PARA LA HORA DE PERÚ
+import pytz
 from google.api_core import exceptions
+import smtplib # <--- NUEVO: Para enviar correos
+from email.mime.text import MIMEText # <--- NUEVO
+from email.mime.multipart import MIMEMultipart # <--- NUEVO
+from email.mime.application import MIMEApplication # <--- NUEVO
 
 # --- CONFIGURACIÓN ---
 SHEET_ID = "1LoByskK71512Gfyekk67k_OuXIbAg5BkBxq7Jcermz0"
 
-# Configuración de Gemini (Llave oculta)
+# Configuración de Gemini
 try:
     if "GEMINI_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GEMINI_KEY"])
@@ -28,7 +32,7 @@ def get_current_time_peru():
     peru_tz = pytz.timezone('America/Lima')
     return datetime.now(peru_tz).strftime("%Y-%m-%d %H:%M")
 
-# --- FUNCIÓN DE CONEXIÓN A SHEETS (OPTIMIZADA CON CACHÉ) ---
+# --- FUNCIÓN DE CONEXIÓN A SHEETS ---
 @st.cache_resource(ttl=3600)  
 def connect_to_sheets():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -48,7 +52,7 @@ def connect_to_sheets():
     client = gspread.authorize(creds)
     return client.open_by_key(SHEET_ID)
 
-# --- FUNCIÓN PARA CARGAR CONFIGURACIÓN (OPTIMIZADA CON CACHÉ) ---
+# --- FUNCIÓN CARGAR CONFIGURACIÓN ---
 @st.cache_data(ttl=600) 
 def load_config_data():
     try:
@@ -66,7 +70,7 @@ def load_config_data():
     except Exception as e:
         return None, None
 
-# --- FUNCIÓN PARA VERIFICAR SI EL ALUMNO YA DIO EXAMEN ---
+# --- FUNCIÓN VERIFICAR ALUMNO ---
 def check_if_student_exists(dni):
     try:
         wb = connect_to_sheets()
@@ -80,7 +84,49 @@ def check_if_student_exists(dni):
         print(f"Error leyendo duplicados: {e}")
         return False, None
 
-# --- LÓGICA DE IA CON TU PROMPT PEDAGÓGICO ---
+# --- NUEVA FUNCIÓN: ENVIAR CORREO CON PDF ---
+def send_email_with_pdf(recipient_email, student_name, pdf_bytes):
+    # Verificar si existen secretos configurados
+    if "smtp" not in st.secrets:
+        st.warning("⚠️ No se configuró el servidor de correo (secrets). El PDF no se envió por email.")
+        return False
+
+    smtp_user = st.secrets["smtp"]["EMAIL"]
+    smtp_password = st.secrets["smtp"]["PASSWORD"]
+    smtp_server = st.secrets["smtp"].get("SERVER", "smtp.gmail.com")
+    smtp_port = st.secrets["smtp"].get("PORT", 465)
+
+    msg = MIMEMultipart()
+    msg['Subject'] = f"Resultado Evaluación Pavimentos - {student_name}"
+    msg['From'] = f"Evaluación Automática <{smtp_user}>"
+    msg['To'] = recipient_email
+
+    body = f"""Hola {student_name},
+
+Adjunto encontrarás el informe detallado de tu evaluación de Pavimentos.
+Fecha de generación: {get_current_time_peru()}
+
+Atentamente,
+Sistema de Evaluación - Ing. Civil
+"""
+    msg.attach(MIMEText(body, 'plain'))
+
+    # Adjuntar PDF
+    pdf_attachment = MIMEApplication(pdf_bytes, Name=f"Informe_{student_name}.pdf")
+    pdf_attachment['Content-Disposition'] = f'attachment; filename="Informe_{student_name}.pdf"'
+    msg.attach(pdf_attachment)
+
+    try:
+        # Conexión segura SSL
+        with smtplib.SMTP_SSL(smtp_server, smtp_port) as smtp:
+            smtp.login(smtp_user, smtp_password)
+            smtp.send_message(msg)
+        return True
+    except Exception as e:
+        st.error(f"Error enviando correo: {e}")
+        return False
+
+# --- LÓGICA DE IA ---
 def grade_exam_with_gemini(image_file, answer_key, num_questions):
     model_name = 'gemini-2.0-flash-lite-001' 
     model = genai.GenerativeModel(model_name)
@@ -184,40 +230,37 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
     st.error("❌ El sistema está saturado. Por favor intenta enviar de nuevo en 1 minuto.")
     return None
 
-# --- GENERACIÓN DE PDF (ACTUALIZADA CON ENCABEZADO UNSAAC) ---
+# --- GENERACIÓN DE PDF ---
 def create_pdf(student_name, dni, grading_data, total_score):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
     
-    # 1. ENCABEZADO INSTITUCIONAL (NUEVO)
-    # Usamos negrita ('B') para la universidad y centrado ('C')
+    # 1. ENCABEZADO INSTITUCIONAL
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(0, 6, txt="Universidad Nacional de San Antonio Abad del Cusco", ln=1, align='C')
-    pdf.set_font("Arial", size=12) # Volver a fuente normal
+    pdf.set_font("Arial", size=12)
     pdf.cell(0, 6, txt="Escuela Profesional de Ingeniería Civil", ln=1, align='C')
-    pdf.cell(0, 6, txt="Docente: Mgt. César Arbulú Jurado", ln=1, align='C')
+    pdf.cell(0, 6, txt="Docente Ingeniero César Edilberto Arbulu Jurado", ln=1, align='C')
     
-    pdf.ln(5) # Espacio separador antes del título del examen
+    pdf.ln(5)
 
-    # 2. DATOS DEL EXAMEN Y ALUMNO
+    # 2. DATOS DEL EXAMEN
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, txt=f"Resultados del Control de Lectura", ln=1, align='C')
     pdf.set_font("Arial", size=12)
     
     pdf.cell(0, 8, txt=f"Alumno: {student_name}", ln=1, align='L')
     pdf.cell(0, 8, txt=f"DNI/Código: {dni}", ln=1, align='L')
-    # HORA PERÚ
     pdf.cell(0, 8, txt=f"Fecha: {get_current_time_peru()}", ln=1, align='L')
     
-    # 3. LÍNEA SEPARADORA (DINÁMICA)
-    # Usamos get_y() para que la linea se dibuje exactamente donde termina el texto anterior
+    # 3. LÍNEA SEPARADORA
     pdf.ln(2)
     y_position = pdf.get_y()
     pdf.line(10, y_position, 200, y_position)
     pdf.ln(10)
     
-    # 4. CUERPO DEL FEEDBACK (Igual que antes)
+    # 4. CUERPO
     for item in grading_data['detalles']:
         pdf.set_font("Arial", 'B', 12)
         pdf.cell(0, 10, txt=f"Pregunta {item['pregunta']} - Puntaje: {item['puntaje']}/5", ln=1)
@@ -225,7 +268,7 @@ def create_pdf(student_name, dni, grading_data, total_score):
         pdf.multi_cell(0, 6, txt=f"{item['feedback']}")
         pdf.ln(3)
         
-    # 5. NOTA FINAL Y COMENTARIO GLOBAL
+    # 5. NOTA FINAL
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(5)
     pdf.set_font("Arial", 'B', 14)
@@ -266,26 +309,30 @@ if exam_password_sheet:
 st.markdown("---")
 st.write("Ingresa tus datos y sube la foto de tu examen.")
 
-col1, col2 = st.columns(2)
-with col1:
-    dni = st.text_input("Introduce aquí solo el número de tu DNI")
-with col2:
-    name = st.text_input("Apellidos y Nombres completos")
+# --- CAMBIO DE DISEÑO: EMAIL AL LADO DEL DNI ---
+col_dni, col_email = st.columns(2)
+with col_dni:
+    dni = st.text_input("DNI / Código de Estudiante")
+with col_email:
+    email_alumno = st.text_input("Correo Electrónico (para enviar resultados)")
+
+name = st.text_input("Apellidos y Nombres completos")
 
 uploaded_file = st.file_uploader("Tomar foto o subir archivo", type=['jpg', 'png', 'jpeg'])
 
 if st.button("Enviar y Calificar"):
-    if not dni or not name or not uploaded_file:
-        st.warning("⚠️ Faltan datos: Asegúrate de poner tu DNI, Nombre y Foto.")
+    # Validamos que el email también esté presente
+    if not dni or not name or not email_alumno or not uploaded_file:
+        st.warning("⚠️ Faltan datos: Asegúrate de completar DNI, Email, Nombre y Foto.")
     else:
-        # VALIDACIÓN 1: Verificar duplicados (DNI)
+        # VALIDACIÓN 1: Verificar duplicados
         with st.spinner('Verificando registro...'):
             ya_existe, nota_existente = check_if_student_exists(dni)
             
             if ya_existe:
                 st.warning(f"⛔ El DNI {dni} ya realizó este examen previamente.")
                 st.info(f"📋 Tu nota registrada es: **{nota_existente} / 20**")
-                st.error("El sistema no admite reenvíos para garantizar la integridad de la evaluación.")
+                st.error("El sistema no admite reenvíos.")
                 st.stop() 
 
         # VALIDACIÓN 2: Calificación con IA
@@ -300,25 +347,37 @@ if st.button("Enviar y Calificar"):
                 except:
                     nota_final = 0.0
 
-                # Guardado en Sheets (DNI en Columna A)
+                # Guardado en Sheets
                 try:
                     wb = connect_to_sheets()
                     hoja_registro = wb.sheet1
                     hoja_registro.append_row([
                         str(dni).strip(),
                         name, 
-                        get_current_time_peru(), # <--- AQUI USAMOS LA HORA DE PERÚ
-                        nota_final
+                        get_current_time_peru(),
+                        nota_final,
+                        email_alumno # Guardamos también el correo en el Excel
                     ])
                     st.toast("✅ Nota registrada correctamente.")
                 except Exception as e:
                     st.error(f"Error guardando registro: {e}")
 
+                # Generar PDF
+                pdf_bytes = create_pdf(name, dni, result, nota_final)
+
                 # Resultados
                 st.balloons()
                 st.success(f"CALIFICACIÓN COMPLETADA: **{nota_final} / 20**")
+
+                # INTENTO DE ENVÍO DE CORREO
+                with st.spinner('Enviando copia a tu correo...'):
+                    email_enviado = send_email_with_pdf(email_alumno, name, pdf_bytes)
+                    if email_enviado:
+                        st.success(f"📧 Se envió una copia del informe a {email_alumno}")
+                    else:
+                        st.warning("No se pudo enviar el correo automático, pero puedes descargar el PDF abajo.")
                 
-                pdf_bytes = create_pdf(name, dni, result, nota_final)
+                # Botón de Descarga Manual (Backup)
                 st.download_button(
                     label="⬇️ Descargar Informe Pedagógico (PDF)",
                     data=pdf_bytes,
