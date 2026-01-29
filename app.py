@@ -184,22 +184,40 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
     st.error("❌ El sistema está saturado. Por favor intenta enviar de nuevo en 1 minuto.")
     return None
 
-# --- GENERACIÓN DE PDF ---
+# --- GENERACIÓN DE PDF (ACTUALIZADA CON ENCABEZADO UNSAAC) ---
 def create_pdf(student_name, dni, grading_data, total_score):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
     
-    # Encabezado
-    pdf.cell(200, 10, txt=f"Resultados del Control de Lectura", ln=1, align='C')
-    pdf.cell(200, 10, txt=f"Alumno: {student_name}", ln=1, align='L')
-    pdf.cell(200, 10, txt=f"DNI/Código: {dni}", ln=1, align='L')
-    # AQUI USAMOS LA HORA DE PERÚ
-    pdf.cell(200, 10, txt=f"Fecha: {get_current_time_peru()}", ln=1, align='L')
-    pdf.line(10, 45, 200, 45)
+    # 1. ENCABEZADO INSTITUCIONAL (NUEVO)
+    # Usamos negrita ('B') para la universidad y centrado ('C')
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 6, txt="Universidad Nacional de San Antonio Abad del Cusco", ln=1, align='C')
+    pdf.set_font("Arial", size=12) # Volver a fuente normal
+    pdf.cell(0, 6, txt="Escuela Profesional de Ingeniería Civil", ln=1, align='C')
+    pdf.cell(0, 6, txt="Docente: Mgt. César Arbulú Jurado", ln=1, align='C')
+    
+    pdf.ln(5) # Espacio separador antes del título del examen
+
+    # 2. DATOS DEL EXAMEN Y ALUMNO
+    pdf.set_font("Arial", 'B', 14)
+    pdf.cell(0, 10, txt=f"Resultados del Control de Lectura", ln=1, align='C')
+    pdf.set_font("Arial", size=12)
+    
+    pdf.cell(0, 8, txt=f"Alumno: {student_name}", ln=1, align='L')
+    pdf.cell(0, 8, txt=f"DNI/Código: {dni}", ln=1, align='L')
+    # HORA PERÚ
+    pdf.cell(0, 8, txt=f"Fecha: {get_current_time_peru()}", ln=1, align='L')
+    
+    # 3. LÍNEA SEPARADORA (DINÁMICA)
+    # Usamos get_y() para que la linea se dibuje exactamente donde termina el texto anterior
+    pdf.ln(2)
+    y_position = pdf.get_y()
+    pdf.line(10, y_position, 200, y_position)
     pdf.ln(10)
     
-    # Cuerpo del feedback
+    # 4. CUERPO DEL FEEDBACK (Igual que antes)
     for item in grading_data['detalles']:
         pdf.set_font("Arial", 'B', 12)
         pdf.cell(0, 10, txt=f"Pregunta {item['pregunta']} - Puntaje: {item['puntaje']}/5", ln=1)
@@ -207,7 +225,7 @@ def create_pdf(student_name, dni, grading_data, total_score):
         pdf.multi_cell(0, 6, txt=f"{item['feedback']}")
         pdf.ln(3)
         
-    # Nota Final y Comentario Global
+    # 5. NOTA FINAL Y COMENTARIO GLOBAL
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(5)
     pdf.set_font("Arial", 'B', 14)
