@@ -97,17 +97,17 @@ def send_email_with_pdf(recipient_email, student_name, pdf_bytes):
     smtp_port = st.secrets["smtp"].get("PORT", 465)
 
     msg = MIMEMultipart()
-    msg['Subject'] = f"Resultado Evaluación Pavimentos - {student_name}"
+    msg['Subject'] = f"Resultado Evaluación - {student_name}"
     msg['From'] = f"Evaluación Automática <{smtp_user}>"
     msg['To'] = recipient_email
 
     body = f"""Hola {student_name},
 
-Adjunto encontrarás el informe detallado de tu evaluación de Pavimentos.
+Adjunto encontrará el informe detallado de su evaluación.
 Fecha de generación: {get_current_time_peru()}
 
 Atentamente,
-Sistema de Evaluación - Ing. Civil
+Mgt. César Arbulú Jurado - Docente
 """
     msg.attach(MIMEText(body, 'plain'))
 
@@ -280,7 +280,7 @@ def create_pdf(student_name, dni, grading_data, total_score):
     return pdf.output(dest='S').encode('latin-1')
 
 # --- INTERFAZ PRINCIPAL ---
-st.set_page_config(page_title="Examen Pavimentos", page_icon="📝")
+st.set_page_config(page_title="Control de lectura", page_icon="📝")
 
 # 1. CARGA DE CONFIGURACIÓN
 answer_key, exam_password_sheet = load_config_data()
