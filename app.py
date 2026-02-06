@@ -312,7 +312,7 @@ st.write("Ingresa tus datos y sube la foto de tu examen.")
 # --- CAMBIO DE DISEÑO: EMAIL AL LADO DEL DNI ---
 col_dni, col_email = st.columns(2)
 with col_dni:
-    dni = st.text_input("DNI / Código de Estudiante")
+    dni = st.text_input("Código de Estudiante")
 with col_email:
     email_alumno = st.text_input("Correo Electrónico (para enviar resultados)")
 
