@@ -10,10 +10,10 @@ import time
 import random
 import pytz
 from google.api_core import exceptions
-import smtplib # <--- NUEVO: Para enviar correos
-from email.mime.text import MIMEText # <--- NUEVO
-from email.mime.multipart import MIMEMultipart # <--- NUEVO
-from email.mime.application import MIMEApplication # <--- NUEVO
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 
 # --- CONFIGURACIÓN ---
 SHEET_ID = "1LoByskK71512Gfyekk67k_OuXIbAg5BkBxq7Jcermz0"
@@ -26,6 +26,13 @@ try:
         st.error("⚠️ Error: No encontré la llave GEMINI_KEY en los secretos.")
 except Exception as e:
     st.error(f"Error configurando API Key: {e}")
+
+# --- MAPEO DE CORREOS A SECRETS SMTP ---
+# Cada correo institucional apunta a su sección de secrets correspondiente.
+SMTP_MAP = {
+    "cesar.arbulu@unsaac.edu.pe": "smtp_unsaac",
+    "carbuluj@uandina.edu.pe": "smtp_uandina",
+}
 
 # --- FUNCIÓN DE HORA LOCAL (PERÚ) ---
 def get_current_time_peru():
@@ -58,47 +65,77 @@ def load_config_data():
     try:
         wb = connect_to_sheets()
         hoja_config = wb.worksheet("Config")
-        data_config = hoja_config.batch_get(['A1', 'A2'])
+        data_config = hoja_config.batch_get(['A1', 'A2', 'A3'])
         
         answer_key = data_config[0][0][0] if data_config[0] else None
         exam_password = data_config[1][0][0] if (len(data_config) > 1 and data_config[1]) else None
+        sender_email = data_config[2][0][0] if (len(data_config) > 2 and data_config[2]) else None
         
         if exam_password:
             exam_password = str(exam_password).strip()
+        if sender_email:
+            sender_email = str(sender_email).strip()
             
-        return answer_key, exam_password
+        return answer_key, exam_password, sender_email
     except Exception as e:
-        return None, None
+        return None, None, None
 
 # --- FUNCIÓN VERIFICAR ALUMNO ---
-def check_if_student_exists(dni):
+def check_if_student_exists(codigo):
     try:
         wb = connect_to_sheets()
         sheet = wb.sheet1
         records = sheet.get_all_values()
         for row in records:
-            if len(row) >= 4 and str(row[0]).strip().upper() == str(dni).strip().upper():
+            if len(row) >= 4 and str(row[0]).strip().upper() == str(codigo).strip().upper():
                 return True, row[3]
         return False, None
     except Exception as e:
         print(f"Error leyendo duplicados: {e}")
         return False, None
 
-# --- NUEVA FUNCIÓN: ENVIAR CORREO CON PDF ---
-def send_email_with_pdf(recipient_email, student_name, pdf_bytes):
-    # Verificar si existen secretos configurados
-    if "smtp" not in st.secrets:
+# --- FUNCIÓN: OBTENER CREDENCIALES SMTP SEGÚN CORREO REMITENTE ---
+def get_smtp_credentials(sender_email):
+    """
+    Busca en SMTP_MAP la sección de secrets que corresponde al correo
+    seleccionado en la celda A3 de Config. Si no lo encuentra, intenta
+    con la sección genérica 'smtp' como fallback.
+    """
+    secret_key = SMTP_MAP.get(sender_email)
+    
+    if secret_key and secret_key in st.secrets:
+        section = st.secrets[secret_key]
+        return {
+            "email": section["EMAIL"],
+            "password": section["PASSWORD"],
+            "server": section.get("SERVER", "smtp.gmail.com"),
+            "port": section.get("PORT", 465),
+        }
+    
+    # Fallback: sección genérica [smtp] (compatibilidad con config anterior)
+    if "smtp" in st.secrets:
+        section = st.secrets["smtp"]
+        return {
+            "email": section["EMAIL"],
+            "password": section["PASSWORD"],
+            "server": section.get("SERVER", "smtp.gmail.com"),
+            "port": section.get("PORT", 465),
+        }
+    
+    return None
+
+# --- FUNCIÓN: ENVIAR CORREO CON PDF ---
+def send_email_with_pdf(recipient_email, student_name, pdf_bytes, sender_email_config=None):
+    # Obtener credenciales SMTP según el correo elegido en Config A3
+    creds = get_smtp_credentials(sender_email_config)
+    
+    if not creds:
         st.warning("⚠️ No se configuró el servidor de correo (secrets). El PDF no se envió por email.")
         return False
 
-    smtp_user = st.secrets["smtp"]["EMAIL"]
-    smtp_password = st.secrets["smtp"]["PASSWORD"]
-    smtp_server = st.secrets["smtp"].get("SERVER", "smtp.gmail.com")
-    smtp_port = st.secrets["smtp"].get("PORT", 465)
-
     msg = MIMEMultipart()
     msg['Subject'] = f"Resultado Evaluación - {student_name}"
-    msg['From'] = f"Evaluación Automática <{smtp_user}>"
+    msg['From'] = f"Evaluación Automática <{creds['email']}>"
     msg['To'] = recipient_email
 
     body = f"""Saludos {student_name},
@@ -117,9 +154,8 @@ Mgt. César Arbulú Jurado - Docente
     msg.attach(pdf_attachment)
 
     try:
-        # Conexión segura SSL
-        with smtplib.SMTP_SSL(smtp_server, smtp_port) as smtp:
-            smtp.login(smtp_user, smtp_password)
+        with smtplib.SMTP_SSL(creds['server'], creds['port']) as smtp:
+            smtp.login(creds['email'], creds['password'])
             smtp.send_message(msg)
         return True
     except Exception as e:
@@ -231,7 +267,7 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
     return None
 
 # --- GENERACIÓN DE PDF ---
-def create_pdf(student_name, dni, grading_data, total_score):
+def create_pdf(student_name, codigo, grading_data, total_score):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
@@ -251,7 +287,7 @@ def create_pdf(student_name, dni, grading_data, total_score):
     pdf.set_font("Arial", size=12)
     
     pdf.cell(0, 8, txt=f"Alumno: {student_name}", ln=1, align='L')
-    pdf.cell(0, 8, txt=f"DNI/Código: {dni}", ln=1, align='L')
+    pdf.cell(0, 8, txt=f"Código de Alumno: {codigo}", ln=1, align='L')
     pdf.cell(0, 8, txt=f"Fecha: {get_current_time_peru()}", ln=1, align='L')
     
     # 3. LÍNEA SEPARADORA
@@ -283,7 +319,7 @@ def create_pdf(student_name, dni, grading_data, total_score):
 st.set_page_config(page_title="Control de lectura", page_icon="📝")
 
 # 1. CARGA DE CONFIGURACIÓN
-answer_key, exam_password_sheet = load_config_data()
+answer_key, exam_password_sheet, sender_email_config = load_config_data()
 num_questions = 4 
 
 if not answer_key:
@@ -309,28 +345,28 @@ if exam_password_sheet:
 st.markdown("---")
 st.write("Ingresa tus datos y sube la foto de tu examen.")
 
-# --- CAMBIO DE DISEÑO: EMAIL AL LADO DEL DNI ---
-col_dni, col_email = st.columns(2)
-with col_dni:
-    dni = st.text_input("Código de Estudiante")
+# --- DISEÑO: Código de Alumno y Email lado a lado ---
+col_codigo, col_email = st.columns(2)
+with col_codigo:
+    codigo_alumno = st.text_input("Código de Alumno")
 with col_email:
-    email_alumno = st.text_input("Correo Electrónico (para enviar resultados)")
+    email_alumno = st.text_input("Correo Electrónico")
 
 name = st.text_input("Apellidos y Nombres completos")
 
 uploaded_file = st.file_uploader("Tomar foto o subir archivo", type=['jpg', 'png', 'jpeg'])
 
 if st.button("Enviar y Calificar"):
-    # Validamos que el email también esté presente
-    if not dni or not name or not email_alumno or not uploaded_file:
-        st.warning("⚠️ Faltan datos: Asegúrate de completar DNI, Email, Nombre y Foto.")
+    # Validamos campos obligatorios
+    if not codigo_alumno or not name or not email_alumno or not uploaded_file:
+        st.warning("⚠️ Faltan datos: Asegúrate de completar Código de Alumno, Email, Nombre y Foto.")
     else:
         # VALIDACIÓN 1: Verificar duplicados
         with st.spinner('Verificando registro...'):
-            ya_existe, nota_existente = check_if_student_exists(dni)
+            ya_existe, nota_existente = check_if_student_exists(codigo_alumno)
             
             if ya_existe:
-                st.warning(f"⛔ El DNI {dni} ya realizó este examen previamente.")
+                st.warning(f"⛔ El código {codigo_alumno} ya realizó este examen previamente.")
                 st.info(f"📋 Tu nota registrada es: **{nota_existente} / 20**")
                 st.error("El sistema no admite reenvíos.")
                 st.stop() 
@@ -352,26 +388,29 @@ if st.button("Enviar y Calificar"):
                     wb = connect_to_sheets()
                     hoja_registro = wb.sheet1
                     hoja_registro.append_row([
-                        str(dni).strip(),
+                        str(codigo_alumno).strip(),
                         name, 
                         get_current_time_peru(),
                         nota_final,
-                        email_alumno # Guardamos también el correo en el Excel
+                        email_alumno
                     ])
                     st.toast("✅ Nota registrada correctamente.")
                 except Exception as e:
                     st.error(f"Error guardando registro: {e}")
 
                 # Generar PDF
-                pdf_bytes = create_pdf(name, dni, result, nota_final)
+                pdf_bytes = create_pdf(name, codigo_alumno, result, nota_final)
 
                 # Resultados
                 st.balloons()
                 st.success(f"CALIFICACIÓN COMPLETADA: **{nota_final} / 20**")
 
-                # INTENTO DE ENVÍO DE CORREO
+                # ENVÍO DE CORREO (usando credenciales del correo elegido en Config A3)
                 with st.spinner('Enviando copia a tu correo...'):
-                    email_enviado = send_email_with_pdf(email_alumno, name, pdf_bytes)
+                    email_enviado = send_email_with_pdf(
+                        email_alumno, name, pdf_bytes,
+                        sender_email_config=sender_email_config
+                    )
                     if email_enviado:
                         st.success(f"📧 Se envió una copia del informe a {email_alumno}")
                     else:
@@ -381,6 +420,6 @@ if st.button("Enviar y Calificar"):
                 st.download_button(
                     label="⬇️ Descargar Informe Pedagógico (PDF)",
                     data=pdf_bytes,
-                    file_name=f"Informe_{dni}.pdf",
+                    file_name=f"Informe_{codigo_alumno}.pdf",
                     mime="application/pdf"
                 )
