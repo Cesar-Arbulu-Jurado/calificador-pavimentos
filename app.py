@@ -267,14 +267,19 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
     return None
 
 # --- GENERACIÓN DE PDF ---
-def create_pdf(student_name, codigo, grading_data, total_score):
+def create_pdf(student_name, codigo, grading_data, total_score, sender_email=None):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
     
-    # 1. ENCABEZADO INSTITUCIONAL
+    # 1. ENCABEZADO INSTITUCIONAL (dinámico según correo remitente)
+    if sender_email and sender_email.strip().lower() == "carbuluj@uandina.edu.pe":
+        nombre_universidad = "Universidad Andina del Cusco"
+    else:
+        nombre_universidad = "Universidad Nacional de San Antonio Abad del Cusco"
+    
     pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 6, txt="Universidad Nacional de San Antonio Abad del Cusco", ln=1, align='C')
+    pdf.cell(0, 6, txt=nombre_universidad, ln=1, align='C')
     pdf.set_font("Arial", size=12)
     pdf.cell(0, 6, txt="Escuela Profesional de Ingeniería Civil", ln=1, align='C')
     pdf.cell(0, 6, txt="Docente: Mgt. César Arbulú Jurado", ln=1, align='C')
@@ -399,7 +404,7 @@ if st.button("Enviar y Calificar"):
                     st.error(f"Error guardando registro: {e}")
 
                 # Generar PDF
-                pdf_bytes = create_pdf(name, codigo_alumno, result, nota_final)
+                pdf_bytes = create_pdf(name, codigo_alumno, result, nota_final, sender_email=sender_email_config)
 
                 # Resultados
                 st.balloons()
