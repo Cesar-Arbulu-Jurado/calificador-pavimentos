@@ -250,14 +250,17 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
     st.error("❌ El sistema está saturado. Por favor intenta enviar de nuevo en 1 minuto.")
     return None
 
-# --- DESCARGA DE FUENTE MATEMÁTICA / UNICODE ---
+# --- DESCARGA DE FUENTE MATEMÁTICA / UNICODE (CORREGIDA) ---
 @st.cache_resource
 def get_unicode_font():
     font_filename = "DejaVuSans.ttf"
     if not os.path.exists(font_filename):
         try:
-            url = "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/master/ttf/DejaVuSans.ttf"
-            urllib.request.urlretrieve(url, font_filename)
+            # Usamos el repositorio principal de Matplotlib (altamente estable) y un User-Agent
+            url = "https://raw.githubusercontent.com/matplotlib/matplotlib/main/lib/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf"
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req) as response, open(font_filename, 'wb') as out_file:
+                out_file.write(response.read())
         except Exception as e:
             st.warning(f"No se pudo descargar la fuente matemática: {e}")
             return None
@@ -268,13 +271,12 @@ def create_pdf(student_name, codigo, grading_data, total_score, sender_email=Non
     pdf = FPDF()
     pdf.add_page()
     
-    # Intentar cargar la fuente matemática para todo el documento
     font_path = get_unicode_font()
     if font_path and os.path.exists(font_path):
         pdf.add_font("DejaVu", "", font_path)
         base_font = "DejaVu"
     else:
-        base_font = "Arial" # Fallback en caso de error extremo
+        base_font = "Arial" 
     
     # 1. ENCABEZADO INSTITUCIONAL
     if sender_email and sender_email.strip().lower() == "carbuluj@uandina.edu.pe":
@@ -310,7 +312,6 @@ def create_pdf(student_name, codigo, grading_data, total_score, sender_email=Non
         pdf.cell(0, 10, txt=f"Pregunta {item['pregunta']} - Puntaje: {item['puntaje']}/5", ln=1)
         pdf.set_font(base_font, '', 11)
         
-        # El texto ingresa PURO, con todos sus símbolos matemáticos.
         pdf.multi_cell(0, 6, txt=str(item['feedback']))
         pdf.ln(3)
         
@@ -324,7 +325,6 @@ def create_pdf(student_name, codigo, grading_data, total_score, sender_email=Non
     
     pdf.multi_cell(0, 6, txt=f"Evaluación Global:\n{str(grading_data['comentario_final'])}")
     
-    # Retornamos los bytes generados con fpdf2
     return bytes(pdf.output())
 
 # --- INTERFAZ PRINCIPAL ---
