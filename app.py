@@ -14,11 +14,12 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
+import os
+import urllib.request
 
 # --- CONFIGURACIÓN ---
 SHEET_ID = "1LoByskK71512Gfyekk67k_OuXIbAg5BkBxq7Jcermz0"
 
-# Configuración de Gemini
 try:
     if "GEMINI_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GEMINI_KEY"])
@@ -27,19 +28,15 @@ try:
 except Exception as e:
     st.error(f"Error configurando API Key: {e}")
 
-# --- MAPEO DE CORREOS A SECRETS SMTP ---
-# Cada correo institucional apunta a su sección de secrets correspondiente.
 SMTP_MAP = {
     "cesar.arbulu@unsaac.edu.pe": "smtp_unsaac",
     "carbuluj@uandina.edu.pe": "smtp_uandina",
 }
 
-# --- FUNCIÓN DE HORA LOCAL (PERÚ) ---
 def get_current_time_peru():
     peru_tz = pytz.timezone('America/Lima')
     return datetime.now(peru_tz).strftime("%Y-%m-%d %H:%M")
 
-# --- FUNCIÓN DE CONEXIÓN A SHEETS ---
 @st.cache_resource(ttl=3600)  
 def connect_to_sheets():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -59,7 +56,6 @@ def connect_to_sheets():
     client = gspread.authorize(creds)
     return client.open_by_key(SHEET_ID)
 
-# --- FUNCIÓN CARGAR CONFIGURACIÓN ---
 @st.cache_data(ttl=600) 
 def load_config_data():
     try:
@@ -80,7 +76,6 @@ def load_config_data():
     except Exception as e:
         return None, None, None
 
-# --- FUNCIÓN VERIFICAR ALUMNO ---
 def check_if_student_exists(codigo):
     try:
         wb = connect_to_sheets()
@@ -94,13 +89,7 @@ def check_if_student_exists(codigo):
         print(f"Error leyendo duplicados: {e}")
         return False, None
 
-# --- FUNCIÓN: OBTENER CREDENCIALES SMTP SEGÚN CORREO REMITENTE ---
 def get_smtp_credentials(sender_email):
-    """
-    Busca en SMTP_MAP la sección de secrets que corresponde al correo
-    seleccionado en la celda A3 de Config. Si no lo encuentra, intenta
-    con la sección genérica 'smtp' como fallback.
-    """
     secret_key = SMTP_MAP.get(sender_email)
     
     if secret_key and secret_key in st.secrets:
@@ -112,7 +101,6 @@ def get_smtp_credentials(sender_email):
             "port": section.get("PORT", 465),
         }
     
-    # Fallback: sección genérica [smtp] (compatibilidad con config anterior)
     if "smtp" in st.secrets:
         section = st.secrets["smtp"]
         return {
@@ -124,9 +112,7 @@ def get_smtp_credentials(sender_email):
     
     return None
 
-# --- FUNCIÓN: ENVIAR CORREO CON PDF ---
 def send_email_with_pdf(recipient_email, student_name, pdf_bytes, sender_email_config=None):
-    # Obtener credenciales SMTP según el correo elegido en Config A3
     creds = get_smtp_credentials(sender_email_config)
     
     if not creds:
@@ -148,7 +134,6 @@ Mgt. César Arbulú Jurado - Docente
 """
     msg.attach(MIMEText(body, 'plain'))
 
-    # Adjuntar PDF
     pdf_attachment = MIMEApplication(pdf_bytes, Name=f"Informe_{student_name}.pdf")
     pdf_attachment['Content-Disposition'] = f'attachment; filename="Informe_{student_name}.pdf"'
     msg.attach(pdf_attachment)
@@ -162,7 +147,6 @@ Mgt. César Arbulú Jurado - Docente
         st.error(f"Error enviando correo: {e}")
         return False
 
-# --- LÓGICA DE IA ---
 def grade_exam_with_gemini(image_file, answer_key, num_questions):
     model_name = 'gemini-2.0-flash-lite-001' 
     model = genai.GenerativeModel(model_name)
@@ -266,30 +250,49 @@ def grade_exam_with_gemini(image_file, answer_key, num_questions):
     st.error("❌ El sistema está saturado. Por favor intenta enviar de nuevo en 1 minuto.")
     return None
 
+# --- DESCARGA DE FUENTE MATEMÁTICA / UNICODE ---
+@st.cache_resource
+def get_unicode_font():
+    font_filename = "DejaVuSans.ttf"
+    if not os.path.exists(font_filename):
+        try:
+            url = "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/master/ttf/DejaVuSans.ttf"
+            urllib.request.urlretrieve(url, font_filename)
+        except Exception as e:
+            st.warning(f"No se pudo descargar la fuente matemática: {e}")
+            return None
+    return font_filename
+
 # --- GENERACIÓN DE PDF ---
 def create_pdf(student_name, codigo, grading_data, total_score, sender_email=None):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", size=12)
     
-    # 1. ENCABEZADO INSTITUCIONAL (dinámico según correo remitente)
+    # Intentar cargar la fuente matemática para todo el documento
+    font_path = get_unicode_font()
+    if font_path and os.path.exists(font_path):
+        pdf.add_font("DejaVu", "", font_path)
+        base_font = "DejaVu"
+    else:
+        base_font = "Arial" # Fallback en caso de error extremo
+    
+    # 1. ENCABEZADO INSTITUCIONAL
     if sender_email and sender_email.strip().lower() == "carbuluj@uandina.edu.pe":
         nombre_universidad = "Universidad Andina del Cusco"
     else:
         nombre_universidad = "Universidad Nacional de San Antonio Abad del Cusco"
     
-    pdf.set_font("Arial", 'B', 12)
+    pdf.set_font(base_font, '', 12)
     pdf.cell(0, 6, txt=nombre_universidad, ln=1, align='C')
-    pdf.set_font("Arial", size=12)
     pdf.cell(0, 6, txt="Escuela Profesional de Ingeniería Civil", ln=1, align='C')
     pdf.cell(0, 6, txt="Docente: Mgt. César Arbulú Jurado", ln=1, align='C')
     
     pdf.ln(5)
 
     # 2. DATOS DEL EXAMEN
-    pdf.set_font("Arial", 'B', 14)
+    pdf.set_font(base_font, '', 14)
     pdf.cell(0, 10, txt=f"Resultados del Control de Lectura", ln=1, align='C')
-    pdf.set_font("Arial", size=12)
+    pdf.set_font(base_font, '', 12)
     
     pdf.cell(0, 8, txt=f"Alumno: {student_name}", ln=1, align='L')
     pdf.cell(0, 8, txt=f"Código de Alumno: {codigo}", ln=1, align='L')
@@ -303,27 +306,30 @@ def create_pdf(student_name, codigo, grading_data, total_score, sender_email=Non
     
     # 4. CUERPO
     for item in grading_data['detalles']:
-        pdf.set_font("Arial", 'B', 12)
+        pdf.set_font(base_font, '', 12)
         pdf.cell(0, 10, txt=f"Pregunta {item['pregunta']} - Puntaje: {item['puntaje']}/5", ln=1)
-        pdf.set_font("Arial", size=11)
-        pdf.multi_cell(0, 6, txt=f"{item['feedback']}")
+        pdf.set_font(base_font, '', 11)
+        
+        # El texto ingresa PURO, con todos sus símbolos matemáticos.
+        pdf.multi_cell(0, 6, txt=str(item['feedback']))
         pdf.ln(3)
         
     # 5. NOTA FINAL
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(5)
-    pdf.set_font("Arial", 'B', 14)
+    pdf.set_font(base_font, '', 14)
     pdf.cell(0, 10, txt=f"NOTA FINAL: {total_score} / 20", ln=1, align='R')
     
-    pdf.set_font("Arial", 'I', 11)
-    pdf.multi_cell(0, 6, txt=f"Evaluación Global:\n{grading_data['comentario_final']}")
+    pdf.set_font(base_font, '', 11)
     
-    return pdf.output(dest='S').encode('latin-1')
+    pdf.multi_cell(0, 6, txt=f"Evaluación Global:\n{str(grading_data['comentario_final'])}")
+    
+    # Retornamos los bytes generados con fpdf2
+    return bytes(pdf.output())
 
 # --- INTERFAZ PRINCIPAL ---
 st.set_page_config(page_title="Control de lectura", page_icon="📝")
 
-# 1. CARGA DE CONFIGURACIÓN
 answer_key, exam_password_sheet, sender_email_config = load_config_data()
 num_questions = 4 
 
@@ -334,7 +340,6 @@ if not answer_key:
     st.error("⚠️ Error cargando la configuración. Si persiste, contacte al profesor.")
     st.stop()
 
-# 2. PANTALLA DE BLOQUEO
 st.title("📝 Control de lectura")
 
 if exam_password_sheet:
@@ -346,11 +351,9 @@ if exam_password_sheet:
     else:
         st.success("Acceso Autorizado ✅")
 
-# 3. ZONA DEL ALUMNO
 st.markdown("---")
 st.write("Ingresa tus datos y sube la foto de tu examen.")
 
-# --- DISEÑO: Código de Alumno y Email lado a lado ---
 col_codigo, col_email = st.columns(2)
 with col_codigo:
     codigo_alumno = st.text_input("Código de Alumno")
@@ -362,11 +365,9 @@ name = st.text_input("Apellidos y Nombres completos")
 uploaded_file = st.file_uploader("Tomar foto o subir archivo", type=['jpg', 'png', 'jpeg'])
 
 if st.button("Enviar y Calificar"):
-    # Validamos campos obligatorios
     if not codigo_alumno or not name or not email_alumno or not uploaded_file:
         st.warning("⚠️ Faltan datos: Asegúrate de completar Código de Alumno, Email, Nombre y Foto.")
     else:
-        # VALIDACIÓN 1: Verificar duplicados
         with st.spinner('Verificando registro...'):
             ya_existe, nota_existente = check_if_student_exists(codigo_alumno)
             
@@ -376,19 +377,16 @@ if st.button("Enviar y Calificar"):
                 st.error("El sistema no admite reenvíos.")
                 st.stop() 
 
-        # VALIDACIÓN 2: Calificación con IA
         with st.spinner('Evaluando con criterio pedagógico...'):
             result = grade_exam_with_gemini(uploaded_file, answer_key, num_questions)
             
             if result:
-                # Cálculo de Nota
                 try:
                     puntos = sum(item['puntaje'] for item in result['detalles'])
                     nota_final = round((puntos / (num_questions * 5)) * 20, 2)
                 except:
                     nota_final = 0.0
 
-                # Guardado en Sheets
                 try:
                     wb = connect_to_sheets()
                     hoja_registro = wb.sheet1
@@ -403,14 +401,11 @@ if st.button("Enviar y Calificar"):
                 except Exception as e:
                     st.error(f"Error guardando registro: {e}")
 
-                # Generar PDF
                 pdf_bytes = create_pdf(name, codigo_alumno, result, nota_final, sender_email=sender_email_config)
 
-                # Resultados
                 st.balloons()
                 st.success(f"CALIFICACIÓN COMPLETADA: **{nota_final} / 20**")
 
-                # ENVÍO DE CORREO (usando credenciales del correo elegido en Config A3)
                 with st.spinner('Enviando copia a tu correo...'):
                     email_enviado = send_email_with_pdf(
                         email_alumno, name, pdf_bytes,
@@ -421,7 +416,6 @@ if st.button("Enviar y Calificar"):
                     else:
                         st.warning("No se pudo enviar el correo automático, pero puedes descargar el PDF abajo.")
                 
-                # Botón de Descarga Manual (Backup)
                 st.download_button(
                     label="⬇️ Descargar Informe Pedagógico (PDF)",
                     data=pdf_bytes,
